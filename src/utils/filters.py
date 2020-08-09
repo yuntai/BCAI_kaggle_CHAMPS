@@ -53,7 +53,7 @@ def subgraph_filter(x_atom, x_atom_pos, x_bond, x_bond_dist, x_triplet, x_triple
         idx_to_drop = np.random.randint(n_valid_atoms-1)
         dist_row = atom_dists[idx_to_drop]
         neighbor_to_drop = torch.argmin((dist_row[dist_row>0])[:n_valid_atoms-1]).item()
-        if neighbor_to_drop >= idx_to_drop: 
+        if neighbor_to_drop >= idx_to_drop:
             neighbor_to_drop += 1
         x_atom[mol_id, idx_to_drop] = 0
         x_atom[mol_id, neighbor_to_drop] = 0

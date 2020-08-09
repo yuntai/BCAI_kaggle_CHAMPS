@@ -72,7 +72,8 @@ parser.add_argument('--clip', type=float, default=0.25,
                     help='gradient clipping')
 parser.add_argument('--max_epoch', type=int, default=250,
                     help='upper epoch limit')
-parser.add_argument('--batch_size', type=int, default=48,
+#parser.add_argument('--batch_size', type=int, default=48,
+parser.add_argument('--batch_size', type=int, default=12,
                     help='batch size')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
@@ -117,7 +118,8 @@ parser.add_argument('--use_quad', action='store_true',
                     help='use quadruplet information')
 parser.add_argument('--name', type=str, default='',
                     help='name of the experiment')
-parser.add_argument('--mode', type=str, default='_full',
+#parser.add_argument('--mode', type=str, default='_full',
+parser.add_argument('--mode', type=str, default='',
                     choices=['', '_full'],
                     help='mode of the dataset')
 parser.add_argument('--eta_min', type=float, default=1e-7,

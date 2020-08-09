@@ -1,0 +1,37 @@
+# ATOMS
+molecule_name
+atom_index
+atom
+x y z
+distance: distance to other atom in same moleclue
+angle: angles to the 2 closest atoms
+bond_order: bond order from xyz2mol
+top_bond: bond orders of the top 4 bonds
+bond_id: valence||total num bonded neigh||largest order||second largest order
+labeled_atom
+sublabel_atom: atom-(bond_id)-(chem_bond_atoms in bond_orders)
+
+charge: (from pybel)
+spin
+heavyvalence
+heterovalence
+valence
+hyb_type
+
+# BONDS
+type: coupling type
+labeled_type: from long_symbols(atom||bond_order)
+sublabel_type: concatenation of long_symbols
+bond_order: participating bond order
+predict: 1
+
+# embedding
+-- atoms
+- type 0: atom
+- type 1: labeled_atom[:5]
+- type 2: labeled_atom
+-- bonds
+type, labeled_type, sublabel_type
+
+
+
