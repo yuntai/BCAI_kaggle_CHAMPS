@@ -17,9 +17,8 @@ class HierarchicalEmbedding(nn.Module):
         super().__init__()
         self.n_hierarchy = n_hierarchy
         d_embeds = d_embeds if type(d_embeds) == list else [d_embeds] * n_hierarchy
-        self.d_embeds = d_embeds
-        assert len(n_tokens) == n_hierarchy, "n_tokens must agree with n_hierarchy"
-        assert len(self.d_embeds) == n_hierarchy, "d_embeds must agree with n_hierarchy"
+        assert len(n_tokens) == n_hierarchy, "len(n_tokens) must agree with n_hierarchy"
+        assert len(d_embeds) == n_hierarchy, "len(d_embeds) must agree with n_hierarchy"
 
         self.embeds = nn.ModuleList([])
         for i in range(n_hierarchy):
@@ -38,6 +37,7 @@ class HierarchicalEmbedding(nn.Module):
         embed_res = 0
         for type_index_level in range(self.n_hierarchy):
             embed_res += self.embeds[type_index_level](x[..., type_index_level])   # Embed this subtype, and project back to full dimension
+
         return embed_res
 
 
@@ -50,4 +50,5 @@ if __name__ == "__main__":
                    torch.LongTensor(bsz, seq_len, 1).random_(1, 120)], dim=2)
     embedding = HierarchicalEmbedding(n_hierarchy, [16, 51, 121], [300, 200, 100])
     embed_x = embedding(x)
+    assert embed_x.size() == (bsz, seq_len, 300)
     print(embed_x.shape)    # Should be (bsz x seq_len x 300)

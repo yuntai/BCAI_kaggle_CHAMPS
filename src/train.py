@@ -72,12 +72,11 @@ parser.add_argument('--clip', type=float, default=0.25,
                     help='gradient clipping')
 parser.add_argument('--max_epoch', type=int, default=250,
                     help='upper epoch limit')
-#parser.add_argument('--batch_size', type=int, default=48,
 parser.add_argument('--batch_size', type=int, default=12,
                     help='batch size')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
-parser.add_argument('--cuda', action='store_true',
+parser.add_argument('--cuda', type=bool, default=True,
                     help='use CUDA')
 parser.add_argument('--debug', action='store_true',
                     help='run in debug mode (do not create exp dir)')
@@ -168,13 +167,13 @@ if len(args.name) == 0:
 #
 #####################################################################
 
-batch_size = args.batch_size
 train_dataset, val_dataset = get_datasets(args.data, mode=args.mode)
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
 if val_dataset is not None:
     assert args.mode != "_full", "You should NOT use the validation set when not in _full mode"
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
 
+print("traindataset atoms shape=", train_dataset.tensors[1].shape)
 NUM_ATOM_TYPES = [int(train_dataset.tensors[1][:,:,i].max()) for i in range(3)]   # Atom hierarchy has 3 levels
 NUM_BOND_TYPES = [int(train_dataset.tensors[3][:,:,i].max()) for i in range(3)]   # Bond hierarchy has 3 levels
 NUM_TRIPLET_TYPES = [int(train_dataset.tensors[5][:,:,i].max()) for i in range(2)]  # Triplet hierarchy has 2 levels
@@ -201,7 +200,7 @@ if len(args.load) > 0:
     model = torch.load(args.load)
 else:
     model = GraphTransformer(dim=args.d_model, n_layers=args.n_layer, d_inner=args.d_inner,
-                             fdim = args.feature_dim, final_dim=args.final_dim, dropout=args.dropout,
+                             fdim=args.feature_dim, final_dim=args.final_dim, dropout=args.dropout,
                              dropatt=args.dropatt, final_dropout=args.final_dropout, n_head=args.n_head,
                              num_atom_types=NUM_ATOM_TYPES,
                              num_bond_types=NUM_BOND_TYPES,
@@ -276,18 +275,34 @@ logging(f'#params = {args.n_all_param/1e6:.2f}M')
 #####################################################################
 
 def loss(y_pred, y, x_bond):
+    # bs x num_bond_types[1] x max_bond_count
+    # y_pred.shape= torch.Size([12, 70, 250])
+
+    # y.shape= torch.Size([12, 250, 4]) scalar_coupling_constant/id, sc_mean, sc_std, predict
+    # x_bond.shape= torch.Size([12, 250, 5]) bond_type(3), atom_index(2)
+
+    # adding 0 type?
     y_pred_pad = torch.cat([torch.zeros(y_pred.shape[0], 1, y_pred.shape[2], device=y_pred.device), y_pred], dim=1)
 
-    # Note: The [:,:,1] below should match the num_bond_types[1]*final_dim in graph transformer
-    y_pred_scaled = y_pred_pad.gather(1,x_bond[:,:,1][:,None,:])[:,0,:] * y[:,:,2] + y[:,:,1]
-    abs_dy = (y_pred_scaled - y[:,:,0]).abs()
-    loss_bonds = (x_bond[:,:,0] > 0)
-    abs_err = abs_dy.masked_select(loss_bonds & (y[:,:,3] > 0)).sum()
+    #y_pred_pad.shape = [12, 71, 250]
 
-    type_dy = [abs_dy.masked_select(x_bond[:,:,0] == i) for i in range(1,NUM_BOND_ORIG_TYPES+1)]
+    # Note: The [:,:,1] below should match the num_bond_types[1]*final_dim in graph transformer
+
+    # TODO(YK): x_bond[:,:,1] - choose second type
+    # x_bond[:,:,1][:,None,:] ~ (bs, 1, 250) # bond type index
+    # y_pred_pad = (12 x 71 x 250)
+    y_pred_scaled[i, j, k] = y_pred_pad[i][index[i,j,k]][k]
+    # y_pred_pad.gather(1, x_bond[:,:,1][:,None,:]).shape) = torch.Size([12, 1, 250])
+    y_pred_scaled = y_pred_pad.gather(1, x_bond[:,:,1][:,None,:])[:,0,:] * y[:,:,2] + y[:,:,1] # pred * std + mean
+    # y_pred_scaled.shape= torch.Size([12, 250])
+    abs_dy = (y_pred_scaled - y[:,:,0]).abs() # pred - gt
+    loss_bonds = (x_bond[:,:,0] > 0)  # bond_type_index > 0
+    abs_err = abs_dy.masked_select(loss_bonds & (y[:,:,3] > 0)).sum() # y[...,:3] whether it should be predicted
+
+    type_dy = [abs_dy.masked_select(x_bond[:,:,0] == i) for i in range(1, NUM_BOND_ORIG_TYPES + 1)]
     if args.champs_loss:
         type_err = torch.cat([t.sum().view(1) for t in type_dy], dim=0)
-        type_cnt = torch.cat([torch.sum(x_bond[:,:,0] == i).view(1) for i in range(1,NUM_BOND_ORIG_TYPES+1)])
+        type_cnt = torch.cat([torch.sum(x_bond[:,:,0] == i).view(1) for i in range(1, NUM_BOND_ORIG_TYPES + 1)])
     else:
         type_err = torch.tensor([t.sum() for t in type_dy])
         type_cnt = torch.tensor([len(t) for t in type_dy])
@@ -304,10 +319,9 @@ def epoch(loader, model, opt=None, ep=-1):
     with torch.enable_grad() if opt else torch.no_grad():
         batch_id = 0
         total_loss = torch.zeros(NUM_BOND_ORIG_TYPES)
-        for x_idx, x_atom, x_atom_pos, x_bond, x_bond_dist, x_triplet, x_triplet_angle, x_quad, x_quad_angle, y in loader:
+        for _batch in loader:
             x_atom, x_atom_pos, x_bond, x_bond_dist, x_triplet, x_triplet_angle, x_quad, x_quad_angle, y = \
-                x_atom.to(dev), x_atom_pos.to(dev), x_bond.to(dev), x_bond_dist.to(dev), \
-                x_triplet.to(dev), x_triplet_angle.to(dev), x_quad.to(dev), x_quad_angle.to(dev), y.to(dev)
+                    [t.to(dev) for t in _batch]
 
             x_bond, x_bond_dist, y = x_bond[:, :MAX_BOND_COUNT], x_bond_dist[:, :MAX_BOND_COUNT], y[:,:MAX_BOND_COUNT]
 
@@ -359,11 +373,13 @@ def epoch(loader, model, opt=None, ep=-1):
                     opt.param_groups[0]['lr'] = curr_lr
                 elif args.scheduler == 'cosine':
                     scheduler.step(train_step)
+
                 if args.batch_chunk == 1:
                     raw_loss = b_abs_err/b_type_cnt.sum()
                     if args.champs_loss:
                         nonzero_indices = b_type_cnt.nonzero()
                         raw_loss = torch.log((b_type_err[nonzero_indices] / b_type_cnt[nonzero_indices].float()) + 1e-9).mean()
+
                     if APEX_AVAILABLE:
                         with amp.scale_loss(raw_loss, opt) as scaled_loss:
                             scaled_loss.backward()

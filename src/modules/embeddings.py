@@ -23,10 +23,9 @@ class TokenFeatureEmbedding(nn.Module):
     def forward(self, tokens, features):
         raise NotImplementedError
 
-
 class LearnableEmbedding(TokenFeatureEmbedding):
-    def __init__(self, n_hierarchy, ntokens, d_embeds, d_feature, n_feature):
-        super(LearnableEmbedding, self).__init__(n_hierarchy, ntokens, d_embeds)
+    def __init__(self, n_hierarchy, n_tokens, d_embeds, d_feature, n_feature):
+        super(LearnableEmbedding, self).__init__(n_hierarchy, n_tokens, d_embeds)
         self.n_feature = n_feature
         self.d_feature = d_feature
         if n_feature > 0:
@@ -35,12 +34,11 @@ class LearnableEmbedding(TokenFeatureEmbedding):
     def forward(self, tokens, features):
         # tokens is of dimension (bsz x seq_len x [# of hierarchies])
         # features is of dimension (bsz x seq_len x n_feature)
-        n_feature = self.n_feature
         if len(features.shape) <= 2 or n_feature > 0:
             features = features[:,:,None]
-        assert (n_feature == 0) or (features.size(2) == self.n_feature), "Number of features do not match"
+        assert (self.n_feature == 0) or (features.size(2) == self.n_feature), "Number of features do not match"
         token_embedding = self.embedding(tokens)
-        if n_feature > 0:
+        if self.n_feature > 0:
             encoding = self.proj(features) if self.d_feature > self.n_feature else features
             return torch.cat([token_embedding, encoding], dim=2)
         return token_embedding
