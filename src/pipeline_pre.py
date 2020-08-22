@@ -35,7 +35,7 @@ with open(root/'SETTINGS.json') as f:
 with open(root/settings['CONFIG_DIR']/'manual_bond_order_fix.json') as f:
     manual_bond_order_dict = json.load(f)
 
-atomic_num_dict = { 'H':1, 'C':6, 'N':7, 'O':8, 'F':9 }
+atomic_num_dict = {'H':1, 'C':6, 'N':7, 'O':8, 'F':9}
 # These were mistaken or too small datasets, so we are relabeling them.
 classification_corrections = {
                       '1JHN_2_2_1_1':'1JHN_3_2_2_1',
@@ -52,6 +52,9 @@ small_longtypes = {'2JHN_4.5_2_3_1.5', '3JHN_4_2_3_1', '2JHN_4_2_3_1',
 (MAX_ATOM_COUNT, MAX_BOND_COUNT, MAX_TRIPLET_COUNT, MAX_QUAD_COUNT) = (29, 406, 54, 117)
 
 
+# structures.csv
+#molecule_name,atom_index,atom,x,y,z
+#dsgdb9nsd_000001,0,C,-0.012698135900000001,1.0858041578,0.008000995799999999
 def make_structure_dict(atoms_dataframe):
     """Convert from structures.csv output to a dictionary data storage.
 
@@ -85,27 +88,27 @@ def enhance_structure_dict(structure_dict):
     from openbabel import pybel
     for molecule_name in structure_dict:
 
-        # positions - array (N,3) of Cartesian positions
         molecule = structure_dict[molecule_name]
+
+        # positions - array (N,3) of Cartesian positions
         positions = np.array(molecule['positions'])
         n_atom = positions.shape[0]
         molecule['positions'] = positions
 
         # distances - array (N,N) of distances between atoms
-        pos1 = np.tile(positions, (n_atom, 1, 1))
-        pos2 = np.transpose(pos1, (1, 0, 2))
-        dist = np.linalg.norm(pos1 - pos2, axis=-1)
+        dist = np.linalg.norm(positions[None,] - positions[:,None], axis=-1)
         molecule['distances'] = dist
 
         # angle - array (N,) of angles to the 2 closest atoms
         sorted_j = np.argsort(dist, axis=-1)
-        relpos1 = positions[sorted_j[:,1],:] - positions[sorted_j[:,0],:]
-        relpos2 = positions[sorted_j[:,2],:] - positions[sorted_j[:,0],:]
-        cos = np.sum(relpos1*relpos2, axis=1) / (np.linalg.norm(relpos1, axis=1) * np.linalg.norm(relpos2, axis=1))
-        angle = np.arccos(np.clip(cos, -1.0, 1.0)).reshape((n_atom, 1)) / np.pi
-        molecule['angle'] = angle[:,0]
+        # relpos to the 2 closest atoms
+        relpos1 = positions[sorted_j[:,1]] - positions
+        relpos2 = positions[sorted_j[:,2]] - positions
+        cos = np.sum(relpos1*relpos2, axis=-1) / (np.linalg.norm(relpos1, axis=-1) * np.linalg.norm(relpos2, axis=-1))
+        angle = np.arccos(np.clip(cos, -1.0, 1.0)) / np.pi
+        molecule['angle'] = angle
 
-        # bond orders - array (N,N) of the bond order (0 for no chemical bond)
+        # bond orders - array (N, N) of the bond order (0 for no chemical bond)
         # Note this relies on a few manual corrections
         molecule['bond_orders'] = np.zeros((n_atom, n_atom))
         atomicNumList = [atomic_num_dict[symbol] for symbol in molecule['symbols']]
@@ -182,6 +185,11 @@ def enhance_atoms(atoms_dataframe, structure_dict):
     atoms_dataframe[newkeys] = atoms_dataframe[['molecule_name', 'atom_index']].apply(__func, axis=1, result_type='expand')
     atoms_dataframe.rename(columns={'long_symbol':'labeled_atom'}, inplace=True)
 
+# train/test.csv
+# id,molecule_name,atom_index_0,atom_index_1,type
+# 4659076,dsgdb9nsd_000004,2,0,2JHC
+# 4659077,dsgdb9nsd_000004,2,1,1JHC
+# 4659078,dsgdb9nsd_000004,2,3,3JHH
 def enhance_bonds(bond_dataframe, structure_dict):
     """Enhance the bonds dataframe by including derived information.
 
@@ -199,7 +207,9 @@ def enhance_bonds(bond_dataframe, structure_dict):
     for row in bond_dataframe.itertuples():
         molecule_name, iatom0, iatom1 = row.molecule_name, row.atom_index_0, row.atom_index_1
         if 'predict' not in structure_dict[molecule_name]:
+            # (n_atom x n_atom)
             structure_dict[molecule_name]['predict'] = structure_dict[molecule_name]['bond_orders'] * 0
+        # set predict=1 for the pairs only in train
         structure_dict[molecule_name]['predict'][iatom0, iatom1] = 1
         structure_dict[molecule_name]['predict'][iatom1, iatom0] = 1
         long_symbols = [structure_dict[molecule_name]['long_symbols'][x] for x in [iatom0, iatom1]]
@@ -243,32 +253,36 @@ def add_all_pairs(bond_dataframe, structure_dict):
     new_data = collections.defaultdict(list)
     for molecule_name in bond_dataframe["molecule_name"].unique():
         n_atom = len(structure_dict[molecule_name]["symbols"])
-        # for backwards compatibility, this is iatom1,iatom0. See make_new_csv.py, write_pairs.
+        # for backwards compatibility, this is iatom1, iatom0. See make_new_csv.py, write_pairs.
         for iatom1, iatom0 in itertools.combinations(range(n_atom), r=2):
             if 'predict' not in structure_dict[molecule_name]:
                 raise KeyError('{} has no "predict" value'.format(molecule_name))
             if structure_dict[molecule_name]['predict'][iatom0, iatom1]:
                 continue  # already got it
+
             symbols = [structure_dict[molecule_name]['symbols'][i] for i in [iatom0, iatom1]]
             bond_order = structure_dict[molecule_name]['bond_orders'][iatom0, iatom1]
             nottype = '-'.join(sorted(symbols)) + '_' + str(bond_order)
 
-            row = {'id':iadd,'molecule_name':molecule_name,'atom_index_0':iatom0,'atom_index_1':iatom1,
-                   'type':nottype,'labeled_type':nottype,'sublabel_type':nottype,
+            row = {'id': iadd, 'molecule_name': molecule_name,
+                   'atom_index_0': iatom0, 'atom_index_1': iatom1,
+                   'type': nottype, 'labeled_type': nottype, 'sublabel_type': nottype,
                    'bond_order': bond_order,
-                   'predict':0}
+                   'predict': 0}
             if 'scalar_coupling_constant' in bond_dataframe:
                 row['scalar_coupling_constant'] = 0.
+
             for k,v in row.items():
                 new_data[k].append(v)
             iadd -= 1
 
     new_data = pd.DataFrame(new_data)
-    if bond_dataframe.index.name!='id':
-      bond_dataframe = bond_dataframe.set_index('id')
-    new_data.set_index('id',inplace=True)
+    if bond_dataframe.index.name != 'id':
+        bond_dataframe = bond_dataframe.set_index('id')
+    new_data.set_index('id', inplace=True)
 
     all_data = bond_dataframe.append(new_data, verify_integrity=True, sort=False)
+
     return all_data
 
 def make_triplets(molecule_list, structure_dict):
@@ -287,18 +301,18 @@ def make_triplets(molecule_list, structure_dict):
         molecule = structure_dict[molecule_name]
         bond_orders = molecule['bond_orders']
         short = molecule['symbols']
-        long = molecule['long_symbols']
+        _long = molecule['long_symbols']
         for i, atom_bond_order in enumerate(bond_orders):
             connection_indices = atom_bond_order.nonzero()[0]
             pairs = itertools.combinations(connection_indices, 2)
             for pair in pairs:
                 j, k = pair[0], pair[1]
-                atom0_short = short[i] + long[i].split('_')[2]
-                atom1_short = short[j] + long[j].split('_')[2]
-                atom2_short = short[k] + long[k].split('_')[2]
-                atom0_long = long[i]
-                atom1_long = long[j]
-                atom2_long = long[k]
+                atom0_short = short[i] + _long[i].split('_')[2]
+                atom1_short = short[j] + _long[j].split('_')[2]
+                atom2_short = short[k] + _long[k].split('_')[2]
+                atom0_long = _long[i]
+                atom1_long = _long[j]
+                atom2_long = _long[k]
                 #labels = ['-'.join([atom1_short,str(atom_bond_order[j])]),
                 #          '-'.join([atom2_short,str(atom_bond_order[k])])]
                 labels = [atom1_short, atom2_short]
@@ -313,13 +327,15 @@ def make_triplets(molecule_list, structure_dict):
                 r20 = molecule['positions'][k] - molecule['positions'][i]
                 angle = np.sum(r10*r20) / (np.linalg.norm(r10)*np.linalg.norm(r20))
                 angle = np.arccos( np.clip(angle,-1.0,1.0) )
-                row = {'molecule_name':molecule_name,'atom_index_0':i,'atom_index_1':j,'atom_index_2':k,
-                      'label':label,'sublabel':sublabel,'angle':angle}
+                row = {'molecule_name': molecule_name, 'atom_index_0': i, 'atom_index_1': j,
+                       'atom_index_2': k, 'label': label, 'sublabel': sublabel,'angle': angle}
                 for k,v in row.items():
                     new_data[k].append(v)
+
     ans = pd.DataFrame(new_data)
     ans.sort_values(['molecule_name','atom_index_0','atom_index_1','atom_index_2'])
     assert int(ans.groupby("molecule_name").count().max()[0]) <= MAX_TRIPLET_COUNT
+
     return ans
 
 
@@ -520,6 +536,7 @@ def _create_embedding(series):
     types = sorted(series.unique().tolist())
     assert "<None>" not in types
     emb_index = dict(zip(["<None>"] + types , range(len(types)+1)))
+
     return emb_index
 
 def add_atoms_embedding_type(atoms):
@@ -539,6 +556,7 @@ def add_bonds_embedding_type(bonds, triplets, quadruplets):
 
 def create_embedding(atoms, bonds, triplets, quadruplets):
     embeddings = {}
+
     embeddings.update({('atom', t): _create_embedding(atoms["type_" + str(t)]) for t in range(3)})
     embeddings.update({('bond', t): _create_embedding(bonds["type_" + str(t)]) for t in range(3)})
     embeddings.update({('triplet', t): _create_embedding(triplets["type_" + str(t)]) for t in range(2)})
@@ -561,7 +579,7 @@ def add_atoms_embedding(atoms, embeddings):
 
     """
     for t in range(3):
-        atoms["type_index_" + str(t)] = atoms["type_" + str(t)].apply(lambda x : embeddings[('atom', t)][x])
+        atoms[f"type_index_{t}"] = atoms[f"type_{t}"].apply(lambda x : embeddings[('atom', t)][x])
 
 def add_bonds_embedding(bonds, triplets, quadruplets, embeddings):
     """Add embedding indices to the dataframes.
@@ -579,13 +597,13 @@ def add_bonds_embedding(bonds, triplets, quadruplets, embeddings):
     """
 
     for t in range(3):
-        bonds["type_index_" + str(t)] = bonds["type_" + str(t)].apply(lambda x : embeddings[('bond', t)][x])
+        bonds[f"type_index_{t}"] = bonds[f"type_{t}"].apply(lambda x : embeddings[('bond', t)][x])
 
     for t in range(2):
-        triplets["type_index_" + str(t)] = triplets["type_" + str(t)].apply(lambda x : embeddings[('triplet', t)][x])
+        triplets[f"type_index_{t}"] = triplets[f"type_{t}"].apply(lambda x : embeddings[('triplet', t)][x])
 
     for t in range(1):
-        quadruplets["type_index_" + str(t)] = quadruplets["type_" + str(t)].apply(lambda x : embeddings[('quadruplet', t)][x])
+        quadruplets[f"type_index_{t}"] = quadruplets[f"type_{t}"].apply(lambda x : embeddings[('quadruplet', t)][x])
 
 def get_scaling(bonds_train):
     """Get the mean/std scaling factors for each ``labeled_type``.
@@ -803,21 +821,28 @@ def create_dataset(atoms, bonds, triplets, quads, labeled=True, max_count=10**10
 
 def auto_preproc_stage1():
     """Stage 1: Read and process csv files to new csv files."""
-    print('Reading structures...')
+
+    print('reading structures...')
     atoms = pd.read_csv(root/settings['RAW_DATA_DIR']/'structures.csv')
-    print('Parsing structures...')
+    print('parsing structures...')
     structure_dict = make_structure_dict(atoms)
-    print('Adding structure features...')
+    print('adding structure features...')
     enhance_structure_dict(structure_dict)
-    print('Updating atoms dataframe...')
+    print('updating atoms dataframe...')
     enhance_atoms(atoms, structure_dict)
-    print('Writing structures...')
+    print('writing structures...')
     write_csv(root/settings['PROCESSED_DATA_DIR'], atoms=atoms)
 
+    # train/test.csv
+    # id,molecule_name,atom_index_0,atom_index_1,type
+    # 4659076,dsgdb9nsd_000004,2,0,2JHC
+    # 4659077,dsgdb9nsd_000004,2,1,1JHC
+    # 4659078,dsgdb9nsd_000004,2,3,3JHH
+
     def process_bonds(label):
-        print(f'Reading bonds for {label}...')
+        print(f'reading bonds for {label}...')
         bonds = pd.read_csv(root/settings['RAW_DATA_DIR']/f'{label}.csv')
-        print('Parsing bonds...')
+        print('parsing bonds...')
         enhance_bonds(bonds, structure_dict)
         bonds = add_all_pairs(bonds, structure_dict)
         triplets = make_triplets(bonds["molecule_name"].unique(), structure_dict)

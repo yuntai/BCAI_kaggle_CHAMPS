@@ -35,16 +35,16 @@ def tta(x_atom, x_atom_pos, x_bond, x_bond_dist, x_triplet, x_triplet_angle, x_q
     return x_atom, x_atom_pos, x_bond, x_bond_dist, x_triplet, x_triplet_angle, x_quad, x_quad_angle
 
 
-def subgraph_filter(x_atom, x_atom_pos, x_bond, x_bond_dist, x_triplet, x_triplet_angle, args):
+def subgraph_filter(x_atom, x_atom_pos, x_bond, x_bond_dist, x_triplet, x_triplet_angle, cutout):
     D = sqdist(x_atom_pos[:,:,:3], x_atom_pos[:,:,:3])
     x_atom, x_atom_pos, x_bond, x_bond_dist, x_triplet, x_triplet_angle = \
         x_atom.clone().detach(), x_atom_pos.clone().detach(), x_bond.clone().detach(), x_bond_dist.clone().detach(), x_triplet.clone().detach(), x_triplet_angle.clone().detach()
     bsz = x_atom.shape[0]
     bonds_mask = torch.ones(bsz, x_bond.shape[1], 1).to(x_atom.device)
     for mol_id in range(bsz):
-        if np.random.uniform(0,1) > args.cutout:
+        if np.random.uniform(0,1) > cutout:
             continue
-        assert not args.use_quad, "Quads are NOT cut out yet"
+        #assert not args.use_quad, "Quads are NOT cut out yet"
         atom_dists = D[mol_id]
         atoms = x_atom[mol_id, :, 0]
         n_valid_atoms = (atoms > 0).sum().item()

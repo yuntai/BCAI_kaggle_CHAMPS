@@ -92,7 +92,7 @@ parser.add_argument('--wnorm', action='store_true',
                     help='use weight normalization')
 parser.add_argument('--max_bond_count', type=int, default=250,
                     help='maximum bond usage')
-parser.add_argument('--log-interval', type=int, default=200,
+parser.add_argument('--log_interval', type=int, default=200,
                     help='report interval')
 parser.add_argument('--batch_chunk', type=int, default=1,
                     help='batch chunking')
@@ -178,7 +178,7 @@ NUM_ATOM_TYPES = [int(train_dataset.tensors[1][:,:,i].max()) for i in range(3)] 
 NUM_BOND_TYPES = [int(train_dataset.tensors[3][:,:,i].max()) for i in range(3)]   # Bond hierarchy has 3 levels
 NUM_TRIPLET_TYPES = [int(train_dataset.tensors[5][:,:,i].max()) for i in range(2)]  # Triplet hierarchy has 2 levels
 NUM_QUAD_TYPES = [int(train_dataset.tensors[7][:,:,i].max()) for i in range(1)]   # Quad hierarchy has only 1 level
-NUM_BOND_ORIG_TYPES = 8
+NUM_BOND_ORIG_TYPES = 8 # 1JHC 1JHN 2JHC 2JHH 2JHN 3JHC 3JHH 3JHN
 MAX_BOND_COUNT = args.max_bond_count
 print(f"Atom hierarchy: {NUM_ATOM_TYPES}")
 print(f"Bond hierarchy: {NUM_BOND_TYPES}")
@@ -275,8 +275,7 @@ logging(f'#params = {args.n_all_param/1e6:.2f}M')
 #####################################################################
 
 def loss(y_pred, y, x_bond):
-    # bs x num_bond_types[1] x max_bond_count
-    # y_pred.shape= torch.Size([12, 70, 250])
+    # y_pred.shape= torch.Size([12, 70, 250]) # bsz x num_bond_types[1] x max_bond_count
 
     # y.shape= torch.Size([12, 250, 4]) scalar_coupling_constant/id, sc_mean, sc_std, predict
     # x_bond.shape= torch.Size([12, 250, 5]) bond_type(3), atom_index(2)
@@ -291,7 +290,7 @@ def loss(y_pred, y, x_bond):
     # TODO(YK): x_bond[:,:,1] - choose second type
     # x_bond[:,:,1][:,None,:] ~ (bs, 1, 250) # bond type index
     # y_pred_pad = (12 x 71 x 250)
-    y_pred_scaled[i, j, k] = y_pred_pad[i][index[i,j,k]][k]
+    # y_pred_scaled[i, j, k] = y_pred_pad[i][index[i,j,k]][k]
     # y_pred_pad.gather(1, x_bond[:,:,1][:,None,:]).shape) = torch.Size([12, 1, 250])
     y_pred_scaled = y_pred_pad.gather(1, x_bond[:,:,1][:,None,:])[:,0,:] * y[:,:,2] + y[:,:,1] # pred * std + mean
     # y_pred_scaled.shape= torch.Size([12, 250])
@@ -300,28 +299,24 @@ def loss(y_pred, y, x_bond):
     abs_err = abs_dy.masked_select(loss_bonds & (y[:,:,3] > 0)).sum() # y[...,:3] whether it should be predicted
 
     type_dy = [abs_dy.masked_select(x_bond[:,:,0] == i) for i in range(1, NUM_BOND_ORIG_TYPES + 1)]
-    if args.champs_loss:
-        type_err = torch.cat([t.sum().view(1) for t in type_dy], dim=0)
-        type_cnt = torch.cat([torch.sum(x_bond[:,:,0] == i).view(1) for i in range(1, NUM_BOND_ORIG_TYPES + 1)])
-    else:
-        type_err = torch.tensor([t.sum() for t in type_dy])
-        type_cnt = torch.tensor([len(t) for t in type_dy])
+    type_err = torch.tensor([t.sum() for t in type_dy])
+    type_cnt = torch.tensor([len(t) for t in type_dy])
+
     return abs_err, type_err, type_cnt
 
 
-def epoch(loader, model, opt=None, ep=-1):
+def epoch(loader, model, opt=None, _epoch=-1):
     global train_step
     model.eval() if opt is None else model.train()
     dev = next(model.parameters()).device
     abs_err, type_err, type_cnt = 0.0, torch.zeros(NUM_BOND_ORIG_TYPES), torch.zeros(NUM_BOND_ORIG_TYPES, dtype=torch.long)
-    log_interval = args.log_interval
 
     with torch.enable_grad() if opt else torch.no_grad():
         batch_id = 0
         total_loss = torch.zeros(NUM_BOND_ORIG_TYPES)
         for _batch in loader:
             x_atom, x_atom_pos, x_bond, x_bond_dist, x_triplet, x_triplet_angle, x_quad, x_quad_angle, y = \
-                    [t.to(dev) for t in _batch]
+                    [t.to(dev) for t in _batch[1:]]
 
             x_bond, x_bond_dist, y = x_bond[:, :MAX_BOND_COUNT], x_bond_dist[:, :MAX_BOND_COUNT], y[:,:MAX_BOND_COUNT]
 
@@ -331,17 +326,19 @@ def epoch(loader, model, opt=None, ep=-1):
 
                 # Perform cutout on the molecule (i.e., for a large molecule, randomly remove an atom and its nearest
                 # neighbor; then remove all bonds/triplets related to this atom)
+
+                assert not args.use_quad, "Quads are NOT cut out yet"
                 x_atom, x_atom_pos, x_bond, x_bond_dist, x_triplet, x_triplet_angle, _ = \
-                    subgraph_filter(x_atom, x_atom_pos, x_bond, x_bond_dist, x_triplet, x_triplet_angle, args)
+                    subgraph_filter(x_atom, x_atom_pos, x_bond, x_bond_dist, x_triplet, x_triplet_angle, args.cutout)
 
             if args.batch_chunk > 1:
                 mbsz = args.batch_size // args.batch_chunk
                 b_abs_err = 0
                 b_type_err = 0
                 b_type_cnt = 0
-                types_cnt = sum([(x_bond[:,:,0] == i).sum() for i in range(1,NUM_BOND_ORIG_TYPES+1)])
+                types_cnt = sum([(x_bond[:,:,0] == i).sum() for i in range(1, NUM_BOND_ORIG_TYPES+1)])
                 for i in range(args.batch_chunk):
-                    mini = slice(i*mbsz,(i+1)*mbsz)
+                    mini = slice(i*mbsz, (i+1)*mbsz)
                     y_pred_mb, _ = para_model(x_atom[mini], x_atom_pos[mini], x_bond[mini], x_bond_dist[mini],
                                               x_triplet[mini], x_triplet_angle[mini], x_quad[mini], x_quad_angle[mini])
                     mb_abs_err, mb_type_err, mb_type_cnt = loss(y_pred_mb, y[mini], x_bond[mini])
@@ -349,13 +346,16 @@ def epoch(loader, model, opt=None, ep=-1):
                     b_type_err += mb_type_err.detach()
                     b_type_cnt += mb_type_cnt.detach()
                     mb_raw_loss = mb_abs_err / types_cnt.float()
-                    if args.champs_loss:
-                        raise ValueError("CHAMPS loss not supported yet with batch_chunk mode")
-                    if APEX_AVAILABLE:
-                        with amp.scale_loss(mb_raw_loss, opt) as scaled_loss:
-                            scaled_loss.backward()
-                    else:
-                        mb_raw_loss.backward()
+
+                    if opt:
+                        if args.champs_loss:
+                            raise ValueError("CHAMPS loss not supported yet with batch_chunk mode")
+
+                        if APEX_AVAILABLE:
+                            with amp.scale_loss(mb_raw_loss, opt) as scaled_loss:
+                                scaled_loss.backward()
+                        else:
+                            mb_raw_loss.backward()
             else:
                 y_pred, _ = para_model(x_atom, x_atom_pos, x_bond, x_bond_dist, x_triplet, x_triplet_angle, x_quad, x_quad_angle)
                 b_abs_err, b_type_err, b_type_cnt = loss(y_pred, y, x_bond)
@@ -385,11 +385,12 @@ def epoch(loader, model, opt=None, ep=-1):
                             scaled_loss.backward()
                     else:
                         raw_loss.backward()
+
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
                 opt.step()
 
-                if batch_id % log_interval == 0:
-                    avg_loss = torch.log(total_loss / log_interval).mean().item()
+                if batch_id % args.log_interval == 0:
+                    avg_loss = torch.log(total_loss / args.log_interval).mean().item()
                     logging(f"Epoch {ep:2d} | Step {train_step} | lr {opt.param_groups[0]['lr']:.7f} | Error {avg_loss:.5f}")
 
                     total_loss = 0
@@ -405,7 +406,8 @@ if __name__ == '__main__':
 
     for i in range(start_epoch, args.max_epoch):
         start = time.time()
-        _, _, _ = epoch(train_loader, model, optimizer, ep=i)
+        epoch(train_loader, model, optimizer, _epoch=i)
+
         if val_dataset is not None:
             _, err, type_err = epoch(val_loader, model)
             end = time.time()

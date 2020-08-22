@@ -188,7 +188,7 @@ class VariationalHidDropout(nn.Module):
         self.dropout = dropout
         self.mask = None
         self.channel_axis = channel_axis
-        
+
     def reset_mask(self, x):
         dropout = self.dropout
 
@@ -205,8 +205,7 @@ class VariationalHidDropout(nn.Module):
         assert self.mask is not None, "You need to reset mask before using VariationalHidDropout"
         mask = self.mask.expand_as(x)  # Make sure the dimension matches
         return mask * x
-    
-    
+
 class VariationalAttnDropout(VariationalHidDropout):
     def __init__(self, dropout=0.0, temporal=True):
         super(VariationalAttnDropout, self).__init__(dropout)

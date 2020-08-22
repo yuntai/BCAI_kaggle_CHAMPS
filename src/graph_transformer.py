@@ -198,20 +198,15 @@ class GraphTransformer(nn.Module):
 
         # TODO: Warning: we are predicting with the second-hierarchy bond (sub)types!!!!!
         self.final_dropout = final_dropout
-        self.final_dim = num_bond_types[1] * final_dim
-        print("final")
-        print(num_bond_types[1], final_dim)
-        print(self.final_dim)
-        print("final")
-        self.final_lin1 = nn.Conv1d(dim, self.final_dim, kernel_size=1)
+        final_dim = num_bond_types[1] * final_dim
+        self.final_lin1 = nn.Conv1d(dim, final_dim, kernel_size=1)
         self.final_res = nn.Sequential(
-                             # ResidualBlock(self.final_dim, self.final_dim, groups=int(num_bond_types[1]), dropout=final_dropout),
-                             ResidualBlock(self.final_dim, self.final_dim, groups=int(num_bond_types[1]), dropout=final_dropout),
-                             nn.Conv1d(self.final_dim, num_bond_types[1], kernel_size=1, groups=int(num_bond_types[1]))
+                             ResidualBlock(final_dim, final_dim, groups=int(num_bond_types[1]), dropout=final_dropout),
+                             nn.Conv1d(final_dim, num_bond_types[1], kernel_size=1, groups=int(num_bond_types[1]))
                          )
         self.apply(self.weights_init)
 
-    def forward(self,x_atom,x_atom_pos, x_bond, x_bond_dist, x_triplet, x_triplet_angle, x_quad, x_quad_angle):
+    def forward(self, x_atom, x_atom_pos, x_bond, x_bond_dist, x_triplet, x_triplet_angle, x_quad, x_quad_angle):
         # PART I: Form the embeddings and the distance matrix
         bsz = x_atom.shape[0]
         N = x_atom.shape[1]
@@ -296,7 +291,7 @@ class GraphTransformer(nn.Module):
         Z = self.final_norm(Z)
         # self.final_dim = num_bond_types[1] * final_dim
         #                       70 x 280
-        # => bs x 650 x 333 => bs x 650 x 250 => bs x final_dim(280) x 250
+        # bs x 333 x 650=> bs x 650 x 333 => bs x 650 x 250 => bs x final_dim(280) x 250
         # bs x 70000 * 250
         Z_group = self.final_lin1(Z.transpose(1,2)[:,:,RB])
         # final_dim => num_bond_types[1] (70) grouped convolution

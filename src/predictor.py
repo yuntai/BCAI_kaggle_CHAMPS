@@ -21,10 +21,10 @@ import torch
 from torch.utils.data import TensorDataset, DataLoader
 
 
-root = '../'  # This should be the root of the archive
-with open(os.path.join(root,'SETTINGS.json')) as f:
+root = pathlib.Path('../)'  # This should be the root of the archive
+with open(root/'SETTINGS.json') as f:
     settings = json.load(f)
-with open(os.path.join(root,settings['CONFIG_DIR'],'models.json')) as f:
+with open(root/settings['CONFIG_DIR']/'models.json')) as f:
     models = json.load(f)
 # Determine the number of chosen models and medians to be averaged for each type
 model_count_for_median = [9,9,9,9,9,9,9,9]
@@ -32,18 +32,18 @@ median_mean_counts = [5,5,5,5,5,5,5,5]
 
 
 def load_model(name):
-    model_folder = os.path.join(root,settings['MODEL_DIR'],models[name+'_dir'])
-    if not os.path.isdir(model_folder):
+    model_folder = root/settings['MODEL_DIR']/models[name+'_dir']
+    if not model_folder.is_dir():
         sys.stderr.write("Error reading model from {}\n".format(model_folder))
         return None
-    if not os.path.isfile(os.path.join(model_folder,'model.ckpt')):
+    if not (model_folder/'model.ckpt').is_file():
         sys.stderr.write("Error reading model from {}/model.ckpt\n".format(model_folder))
         return None
     sys.path = [model_folder] + sys.path
     import graph_transformer
     importlib.reload(graph_transformer)
-    print("Loading {} from {}".format(name,graph_transformer.__file__))
-    with open(os.path.join(model_folder,'config')) as f:
+    print("Loading {} from {}".format(name, graph_transformer.__file__))
+    with open(os.path.join(model_folder, 'config')) as f:
         # JSON standard is double quotes, but some config files use single quotes.
         config_str = f.read().replace("'",'"')
         config = json.loads(config_str)
@@ -54,7 +54,7 @@ def load_model(name):
             'log_interval','batch_chunk','work_dir','restart','restart_dir',
             'load','mode','eta_min','gpu0_bsz','n_all_param','max_step','d_embed',
             'cutout']
-    for new,old in {'dim':'d_model', 'n_layers':'n_layer', 'fdim':'feature_dim',
+    for new, old in {'dim':'d_model', 'n_layers':'n_layer', 'fdim':'feature_dim',
             'dist_embedding':'dist_embed_type', 'atom_angle_embedding':'angle_embed_type',
             'trip_angle_embedding':'quad_angle_embed_type',
             'quad_angle_embedding':'quad_angle_embed_type',
@@ -102,19 +102,19 @@ def single_model_predict(loader, model, modelname):
 
             for id_, pred in zip(ids_selected, y_selected):
                 out_str += "{0:d},{1:f}\n".format(int(id_), pred)
-    with open(os.path.join(root,settings['SUBMISSION_DIR'],modelname+'.csv.bz2'), "wb") as f:
+    with open(root/settings['SUBMISSION_DIR']/modelname+'.csv.bz2'), "wb") as f:
         f.write(bz2.compress(out_str.encode('utf-8')))
     return
 
 
 def load_submission(modelname):
-    data = pd.read_csv(os.path.join(root,settings['SUBMISSION_DIR'],modelname+'.csv.bz2'))
+    data = pd.read_csv(root/settings['SUBMISSION_DIR']/modelname+'.csv.bz2'))
     sort_idx = np.argsort(data['id'])
-    out = np.vstack((data['id'],data['scalar_coupling_constant']))[:,sort_idx].T
+    out = np.vstack((data['id'], data['scalar_coupling_constant']))[:,sort_idx].T
     return out
 
 
-def select_models(n_model,chosen_models,hardcoded=True):
+def select_models(n_model, chosen_models, hardcoded=True):
     if not hardcoded:
         model_mask = np.zeros((n_model,8), dtype=np.bool)
         for i in range(8):
