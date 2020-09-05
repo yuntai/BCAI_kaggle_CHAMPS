@@ -96,7 +96,7 @@ parser.add_argument('--log_interval', type=int, default=200,
                     help='report interval')
 parser.add_argument('--batch_chunk', type=int, default=1,
                     help='batch chunking')
-parser.add_argument('--work_dir', default=os.path.join(root,settings['MODEL_DIR'],'CHAMP-GT'), type=str,
+parser.add_argument('--work_dir', default=root/settings['MODEL_DIR']/'CHAMP-GT', type=str,
                     help='experiment directory.')
 parser.add_argument('--restart', action='store_true',
                     help='restart training from the saved checkpoint')
@@ -131,8 +131,7 @@ args = parser.parse_args()
 if args.d_embed < 0:
     args.d_embed = args.d_model
 
-args.work_dir = '{}'.format(args.work_dir)
-args.work_dir = os.path.join(args.work_dir, time.strftime('%Y%m%d-%H%M%S'))
+args.work_dir = args.work_dir/time.strftime('%Y%m%d-%H%M%S'))
 logging = create_exp_dir(args.work_dir,
     scripts_to_save=['train.py', 'graph_transformer.py'], debug=args.debug)
 
@@ -391,7 +390,7 @@ def epoch(loader, model, opt=None, _epoch=-1):
 
                 if batch_id % args.log_interval == 0:
                     avg_loss = torch.log(total_loss / args.log_interval).mean().item()
-                    logging(f"Epoch {ep:2d} | Step {train_step} | lr {opt.param_groups[0]['lr']:.7f} | Error {avg_loss:.5f}")
+                    logging(f"Epoch {_epoch:2d} | Step {train_step} | lr {opt.param_groups[0]['lr']:.7f} | Error {avg_loss:.5f}")
 
                     total_loss = 0
 
@@ -415,17 +414,17 @@ if __name__ == '__main__':
             type_err_str = [eval(f"{elem:.2f}") for elem in type_err.tolist()]
             logging(f"Epoch {i:2d} | Validation Error (by Type) \n {type_err_str}")
             if err < best_val_err:
-                with open(os.path.join(args.work_dir, 'model.pt'), 'wb') as f:
+                with open(args.work_dir/'model.pt', 'wb') as f:
                     torch.save(model, f)
-                with open(os.path.join(args.work_dir, 'optimizer.pt'), 'wb') as f:
+                with open(args.work_dir/'optimizer.pt', 'wb') as f:
                     torch.save(optimizer.state_dict(), f)
-                save_path = os.path.join(root,settings['MODEL_DIR'],f"ckpt/graph_transformer_part_{args.name}.ckpt")
+                save_path = root/settings['MODEL_DIR']/f"ckpt/graph_transformer_part_{args.name}.ckpt"
                 logging(f"Saving model at {save_path}!")
                 best_val_err = err
                 torch.save(model, save_path)
         else:
             end = time.time()
-            save_path = os.path.join(root,settings['MODEL_DIR'],f"ckpt/graph_transformer_{args.name}.ckpt")
+            save_path = root/settings['MODEL_DIR']/f"ckpt/graph_transformer_{args.name}.ckpt")
             logging(f"Saving model at {save_path} (without validation error)! Time: {end-start:.2f} sec")
             torch.save(model, save_path)
         if args.scheduler == 'dev_perf':

@@ -102,8 +102,10 @@ def single_model_predict(loader, model, modelname):
 
             for id_, pred in zip(ids_selected, y_selected):
                 out_str += "{0:d},{1:f}\n".format(int(id_), pred)
+
     with open(root/settings['SUBMISSION_DIR']/modelname+'.csv.bz2'), "wb") as f:
         f.write(bz2.compress(out_str.encode('utf-8')))
+
     return
 
 
@@ -206,7 +208,7 @@ if __name__=='__main__':
     batch_size = 64
     if 'fast' not in sys.argv:
         print("Loading submission loaders...")
-        with gzip.open(os.path.join(root,settings['PROCESSED_DATA_DIR'],'torch_proc_submission.pkl.gz'),'rb') as f:
+        with gzip.open(os.path.join(root,settings['PROCESSED_DATA_DIR'], 'torch_proc_submission.pkl.gz'),'rb') as f:
             sub_dataset = TensorDataset(*pickle.load(f))
         loader = DataLoader(sub_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
         for modelname in models['names']:

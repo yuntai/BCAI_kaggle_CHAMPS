@@ -222,25 +222,24 @@ def logging(s, log_path, print_=True, log_=True):
 def get_logger(log_path, **kwargs):
     return functools.partial(logging, log_path=log_path, **kwargs)
 
-def create_exp_dir(dir_path, scripts_to_save=None, debug=False):
+def create_exp_dir(exp_dir, scripts_to_save=None, debug=False, print_=True, log_=False):
     if debug:
         print('Debug Mode : no experiment dir created')
         return functools.partial(logging, log_path=None, log_=False)
 
-    if not os.path.exists(dir_path):
-        os.makedirs(dir_path)
+    exp_dir.mkdir(parents=True, exist_ok=True)
 
-    print('Experiment dir : {}'.format(dir_path))
+    print('Experiment dir : {}'.format(exp_dir))
     if scripts_to_save is not None:
-        script_path = os.path.join(dir_path, 'scripts')
-        if not os.path.exists(script_path):
-            os.makedirs(script_path)
+        script_path = exp_dir/'scripts'
+        script_path.mkdir(parents=True, exist_ok=True)
+
         for script in scripts_to_save:
-            dst_file = os.path.join(dir_path, 'scripts', os.path.basename(script))
+            dst_file = script_path/os.path.basename(script)
             shutil.copyfile(script, dst_file)
 
-    return get_logger(log_path=os.path.join(dir_path, 'log.txt'))
+    return get_logger(dir_path/'log.txt', print_=print_, log_=log_)
 
 def save_checkpoint(model, optimizer, path, epoch):
-    torch.save(model, os.path.join(path, 'model_{}.pt'.format(epoch)))
-    torch.save(optimizer.state_dict(), os.path.join(path, 'optimizer_{}.pt'.format(epoch)))
+    torch.save(model, path/'model_{}.pt'.format(epoch))
+    torch.save(optimizer.state_dict(), path/'optimizer_{}.pt'.format(epoch))
